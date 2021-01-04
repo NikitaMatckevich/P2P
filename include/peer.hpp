@@ -9,8 +9,7 @@ namespace net {
   class Peer {
     
     ThreadSafeQueue<Message<T>> m_queue;
-    std::thread m_AsioThread{};
-    std::thread m_UserThread{};
+    std::thread m_asio;
     std::vector<std::shared_ptr<Connection<T>>> m_connections{};
     asio::io_context m_context{};
     asio::ip::tcp::acceptor m_acceptor;
@@ -40,6 +39,7 @@ namespace net {
     virtual bool AcceptConnection(std::shared_ptr<Connection<T>> peer) = 0;
     virtual void ProcessDisconnection(std::shared_ptr<Connection<T>> peer) = 0;
     virtual void ProcessMessage(const Message<T>& msg) = 0;
+    virtual Message<T> WriteMessage() = 0;
 
    public:
     
@@ -63,23 +63,28 @@ namespace net {
       try {
         std::cout << "Client started, press Y to connect to other users\n";
         WaitForConnections();
-        m_AsioThread = std::thread([this]() {
+        m_asio = std::thread([this]() {
           this->m_context.run();
         });
-        m_UserThread = std::thread([this]() {
-          char buttonPressed;
-          while (std::cin >> buttonPressed) {
-            if (buttonPressed == 'Y') {
-              std::string name;
-              std::cout << "Please enter the ID of the user you wish to call\n";
-              std::cin >> name;
-              std::uint16_t port;
-              std::cout << "Please enter the port number\n";
-              std::cin >> port;
-              ConnectTo(name, port);
-            }
+        std::string command;
+        while (std::cin >> command) {
+          if (command == "connect") {
+            std::string name;
+            std::cout << "Please enter the ID of the user you wish to call\n";
+            std::cin >> name;
+            std::uint16_t port;
+            std::cout << "Please enter the port number\n";
+            std::cin >> port;
+            ConnectTo(name, port);
+          } else if (command == "exit") {
+            Stop();
+            std::exit(0);
+          } else if (command == "send") {
+            auto msg = WriteMessage();
+            for (size_t i = 0; i < m_connections.size(); i++)
+              SendMessage(i, msg);
           }
-        });
+        }
       }
       catch (std::exception& e) {
         std::cerr <<  "Peer exception : " << e.what() << '\n';
@@ -95,10 +100,8 @@ namespace net {
       }
       m_connections.clear();
       m_context.stop();
-      if (m_AsioThread.joinable())
-        m_AsioThread.join();
-      if (m_UserThread.joinable())
-        m_UserThread.join();
+      if (m_asio.joinable())
+        m_asio.join();
     }
 
     void Update(size_t maxMsg = -1) {
@@ -117,9 +120,8 @@ namespace net {
             auto connection = std::make_shared<Connection<T>>(m_context, std::move(socket), m_queue);
             if (AcceptConnection(connection)) {
               NewConnection(std::move(connection))->Accept();
-              std::cout << "Connection with\n" << socket.remote_endpoint() << "\nstarted\n";
             } else {
-              std::cout << "Connection with\n" << socket.remote_endpoint() << "\ndenied\n";
+              std::cout << "Connection denied\n";
             }
           } else {
             std::cout << "Connection error : " << ec.message() << '\n';

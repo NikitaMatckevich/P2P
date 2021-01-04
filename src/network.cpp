@@ -25,6 +25,17 @@ class CustomPeer : public net::Peer<CustomMessage> {
       msg.Sender()->SendMessage(msg); // resend back
     }
   }
+  virtual net::Message<CustomMessage> WriteMessage() override final {
+    net::Message<CustomMessage> msg;
+    std::cout << "Please choose the message type\n";
+    std::string type;
+    std::cin >> type;
+    if (type == "say") {
+      msg.Header().Id() = CustomMessage::Say;
+      msg << 42;
+    }
+    return std::move(msg);
+  }
 };
 
 int main(int argc, char** argv) {
@@ -37,5 +48,5 @@ int main(int argc, char** argv) {
   while (true) {
     peer.Update();
   }
-	return 0;
+  return 0;
 }
