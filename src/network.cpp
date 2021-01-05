@@ -11,19 +11,11 @@ class CustomPeer : public net::Peer<CustomMessage> {
  public:
   explicit CustomPeer(std::uint16_t port) : net::Peer<CustomMessage>(port) {} 
 
-  virtual bool AcceptConnection(std::shared_ptr<net::Connection<CustomMessage>> peer) override final {
-    std::cout << "Accepting this guy!\n";
-    return true;
-  }
-  virtual void ProcessDisconnection(std::shared_ptr<net::Connection<CustomMessage>> peer) override final {
-    std::cout << "This guy disconnected!\n";
-    peer->Disconnect();
-    peer.reset();
-  }
-  virtual void ProcessMessage(const net::Message<CustomMessage>& msg) override final {
-    if (msg.Sender() && msg.Sender()->IsConnected()) {
-      msg.Sender()->SendMessage(msg); // resend back
-    }
+  virtual void ProcessMessage(net::Message<CustomMessage>& msg) override final {
+    std::cout << msg;
+    int value;
+    msg >> value;
+    std::cout << " Value : " << value << '\n';
   }
   virtual net::Message<CustomMessage> WriteMessage() override final {
     net::Message<CustomMessage> msg;
@@ -34,7 +26,7 @@ class CustomPeer : public net::Peer<CustomMessage> {
       msg.Header().Id() = CustomMessage::Say;
       msg << 42;
     }
-    return std::move(msg);
+    return msg;
   }
 };
 
@@ -44,9 +36,7 @@ int main(int argc, char** argv) {
     return -1;
   }
   CustomPeer peer(std::stoi(argv[1]));
-  peer.Start();
-  while (true) {
-    peer.Update();
-  }
+  peer.Start(100, 20);
+  peer.ProcessUI();
   return 0;
 }

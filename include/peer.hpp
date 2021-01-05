@@ -3,13 +3,24 @@
 #include <tsqueue.hpp>
 #include <connection.hpp>
 
+namespace {
+  template <class T>
+  T UIFactory(std::string_view name) {
+    T value;
+    std::cout << "Please enter the " << name << '\n';
+    std::cin >> value;
+    return value;
+  }
+}
+
 namespace net {
  
   template <class T>
   class Peer {
     
-    ThreadSafeQueue<Message<T>> m_queue;
-    std::thread m_asio;
+    ThreadSafeQueue<Message<T>> m_queue{};
+    std::thread m_asio{};
+    std::thread m_proc{};
     std::vector<std::shared_ptr<Connection<T>>> m_connections{};
     asio::io_context m_context{};
     asio::ip::tcp::acceptor m_acceptor;
@@ -34,57 +45,53 @@ namespace net {
       );
     }
 
+    void Update(size_t freqReading = -1, size_t tooMuchConnections = 1) {
+      asio::post(m_context, [this, tooMuchConnections]() {
+        if (m_connections.size() >= tooMuchConnections)
+          EraseConnections();
+      });
+      for (size_t i = 0; i < freqReading && !m_queue.Empty(); i++) {
+        ProcessMessage(m_queue.Back());
+        m_queue.Pop();
+      }
+    }
+    
    protected:
 
-    virtual bool AcceptConnection(std::shared_ptr<Connection<T>> peer) = 0;
-    virtual void ProcessDisconnection(std::shared_ptr<Connection<T>> peer) = 0;
-    virtual void ProcessMessage(const Message<T>& msg) = 0;
     virtual Message<T> WriteMessage() = 0;
-
+    virtual void ProcessMessage(Message<T>& msg) = 0;
+    
+    virtual bool AcceptConnection(std::shared_ptr<Connection<T>> peer) {
+      std::cout << "Attention: this function accepts any connection\n";
+      return true;
+    }
+    virtual void ProcessDisconnection(std::shared_ptr<Connection<T>> peer) {
+      std::cout << "Disconnecting\n";
+    }
+    
    public:
     
     explicit Peer(std::uint16_t port)
       : m_acceptor(m_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port))
-      , m_socket(m_context)
-    {}
+      , m_socket(m_context) {}
     
-    virtual ~Peer() {
-      Stop();
-    }
+    virtual ~Peer() { Stop(); }
 
-    ThreadSafeQueue<Message<T>>& Incoming() noexcept {
-      return m_queue;
-    }
-    const ThreadSafeQueue<Message<T>>& Incoming() const noexcept {
-      return m_queue;
-    }
+    ThreadSafeQueue<Message<T>>& Incoming() noexcept { return m_queue; }
+    const ThreadSafeQueue<Message<T>>& Incoming() const noexcept { return m_queue; }
 
-    bool Start() {
+    bool Start(size_t freqReading = -1, size_t tooMuchConnections = 1) {
       try {
-        std::cout << "Client started, press Y to connect to other users\n";
+        std::cout << "Peer started\n";
         WaitForConnections();
         m_asio = std::thread([this]() {
           this->m_context.run();
         });
-        std::string command;
-        while (std::cin >> command) {
-          if (command == "connect") {
-            std::string name;
-            std::cout << "Please enter the ID of the user you wish to call\n";
-            std::cin >> name;
-            std::uint16_t port;
-            std::cout << "Please enter the port number\n";
-            std::cin >> port;
-            ConnectTo(name, port);
-          } else if (command == "exit") {
-            Stop();
-            std::exit(0);
-          } else if (command == "send") {
-            auto msg = WriteMessage();
-            for (size_t i = 0; i < m_connections.size(); i++)
-              SendMessage(i, msg);
+        m_proc = std::thread([this, freqReading, tooMuchConnections]() {
+          while (true) {
+            this->Update(freqReading, tooMuchConnections);
           }
-        }
+        });
       }
       catch (std::exception& e) {
         std::cerr <<  "Peer exception : " << e.what() << '\n';
@@ -98,20 +105,14 @@ namespace net {
         peer->Disconnect();
         peer.reset();
       }
-      m_connections.clear();
       m_context.stop();
+      if (m_proc.joinable())
+        m_proc.join();
       if (m_asio.joinable())
         m_asio.join();
+      m_connections.clear();
     }
-
-    void Update(size_t maxMsg = -1) {
-      for (size_t i = 0; i < maxMsg && !m_queue.Empty(); i++) {
-        ProcessMessage(m_queue.Back());
-        m_queue.Pop();
-      }
-      EraseConnections();
-    }
-        
+            
     void WaitForConnections() {
       m_acceptor.async_accept(
         [this](std::error_code ec, asio::ip::tcp::socket socket) {
@@ -130,37 +131,73 @@ namespace net {
         });
     }
     
-    bool ConnectTo(const std::string& host, const std::uint16_t port) {
-      try {
-        auto connection = std::make_shared<Connection<T>>(m_context,
-          asio::ip::tcp::socket(m_context),
-          m_queue);
-        asio::ip::tcp::resolver resolver(m_context);
-        auto endpoints = resolver.resolve(host, std::to_string(port));
-        NewConnection(std::move(connection))->Propose(endpoints);
-      }
-      catch (std::exception& e) {
-        std::cerr << "Peer exception : " << e.what() << std::endl;
-        return false;
-      }
-      return true;
+    void ConnectTo(const std::string& host, std::uint16_t port) {
+      asio::post(m_context,
+        [this, host, port]() {
+          asio::error_code ec;
+          auto connection = std::make_shared<Connection<T>>(m_context,
+            asio::ip::tcp::socket(m_context),
+            m_queue);
+          asio::ip::tcp::resolver resolver(m_context);
+          auto endpoints = resolver.resolve(host, std::to_string(port), ec);
+          if (!ec) {
+            NewConnection(std::move(connection))->Propose(endpoints);
+          } else {
+            std::cerr << "Connection failed : " << ec.message() << '\n';
+          }
+        });
     }
 
     void DisconnectFrom(size_t peer_id) {
-      auto& peer = m_connections.at(peer_id);
-      if (peer && peer->IsConnected()) {
-        peer->Disconnect();
-      }
-      ProcessDisconnection(std::move(peer));
+      asio::post(m_context,
+        [this, peer_id]() {
+          if (peer_id < m_connections.size()) {
+            auto& peer = m_connections.at(peer_id);
+            if (peer && peer->IsConnected()) {
+              peer->Disconnect();
+            }
+            ProcessDisconnection(peer);
+          } else {
+            std::cerr << "Connection #" << peer_id << " doesn't exist\n";
+          }
+      });
     }
 
     void SendMessage(const size_t reciever_id, const Message<T>& msg) {
-      auto& peer = m_connections.at(reciever_id);
-      if (peer && peer->IsConnected()) {
-        peer->SendMessage(msg);
-      } else {
-        ProcessDisconnection(std::move(peer));
-      }
+      asio::post(m_context,
+        [this, reciever_id, msg]() {
+          if (reciever_id < m_connections.size()) {
+            auto& peer = m_connections.at(reciever_id);
+            if (peer && peer->IsConnected()) {
+              peer->SendMessage(msg);
+            } else {
+              ProcessDisconnection(peer);
+            }
+          } else {
+            std::cerr << "Connection #" << reciever_id << " doesn't exist\n";
+          }
+      });
+    }
+    
+    virtual void ProcessUI(char command = 'h') {
+      do {
+        switch (command) {
+        case 'h': std::cout << "Command list:\n";
+                  std::cout << "\t h \t - display this message\n";
+                  std::cout << "\t c \t - connect to other peer\n";
+                  std::cout << "\t s \t - send some message\n";
+                  std::cout << "\t x \t - exit\n";
+                  break;
+        case 'c': ConnectTo(UIFactory<std::string>("user id"),
+                            UIFactory<std::uint16_t>("port number"));
+                  break;
+        case 's': SendMessage(UIFactory<size_t>("reciever local id"),
+                              WriteMessage());
+                  break;
+        default:  std::cout << "Invalid command\n";
+                  break;
+        }
+      } while (std::cin >> command);
     }
   };
 

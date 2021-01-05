@@ -76,8 +76,8 @@ namespace net {
   };
 
   template <class T>
-  std::ostream operator<<(std::ostream& out, const Message<T>& msg) {
-    out << "Id: " << msg.Header().Id() << "  Size: " << msg.Header().Size();
+  std::ostream& operator<<(std::ostream& out, const Message<T>& msg) {
+    out << "Id: " << std::uint32_t(msg.Header().Id()) << "  Size: " << msg.Header().Size();
     return out;
   }
 

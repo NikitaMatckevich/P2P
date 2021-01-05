@@ -4,15 +4,15 @@
 
 namespace net {
   
-  template <class Id>
-  class Connection : public std::enable_shared_from_this<Connection<Id>> {
+  template <class T>
+  class Connection : public std::enable_shared_from_this<Connection<T>> {
 
     asio::io_context& m_context;
     asio::ip::tcp::socket m_socket;
 
-    ThreadSafeQueue<Message<Id>>& m_recv;
-    ThreadSafeQueue<Message<Id>>  m_send{};
-    Message<Id> m_temporary{};
+    ThreadSafeQueue<Message<T>>& m_recv;
+    ThreadSafeQueue<Message<T>>  m_send{};
+    Message<T> m_temporary{};
 
     void DumpEndpoints() const {
       std::cout << "Local endpoint:\n";
@@ -28,7 +28,7 @@ namespace net {
     }
 
     void ReadHeader() {
-      asio::async_read(m_socket, asio::buffer(&m_temporary.Header(), sizeof(MessageHeader<Id>)),
+      asio::async_read(m_socket, asio::buffer(&m_temporary.Header(), sizeof(MessageHeader<T>)),
         [this](std::error_code ec, size_t length) {
           if (!ec) {
             if (m_temporary.Header().Size() > 0) {
@@ -59,7 +59,7 @@ namespace net {
     }
 
     void WriteHeader() {
-      asio::async_write(m_socket, asio::buffer(&m_send.Back().Header(), sizeof(MessageHeader<Id>)),
+      asio::async_write(m_socket, asio::buffer(&m_send.Back().Header(), sizeof(MessageHeader<T>)),
         [this](std::error_code ec, size_t length) {
           if (!ec) {
             if (m_send.Back().Header().Size() > 0) {
@@ -79,7 +79,7 @@ namespace net {
     }
 
     void WriteBody() {
-      asio::async_write(m_socket, asio::buffer(m_send.Back().Body().data(), sizeof(MessageHeader<Id>)),
+      asio::async_write(m_socket, asio::buffer(m_send.Back().Body().data(), m_send.Back().Body().size()),
         [this](std::error_code ec, size_t length) {
           if (!ec) {
             m_send.Pop();
@@ -97,7 +97,7 @@ namespace net {
    public:
     Connection(asio::io_context& context_reference,
                asio::ip::tcp::socket&& socket,
-               ThreadSafeQueue<Message<Id>>& owner_inbox_queue)
+               ThreadSafeQueue<Message<T>>& owner_inbox_queue)
       : m_context(context_reference)
       , m_socket(std::move(socket))
       , m_recv(owner_inbox_queue) {}
@@ -121,8 +121,9 @@ namespace net {
 
     void Disconnect() {
       if (IsConnected()) {
+        DumpEndpoints();
         asio::post(m_context,
-          [this](){
+          [this]() {   
             this->m_socket.close();
           });
       }
@@ -132,7 +133,7 @@ namespace net {
       return m_socket.is_open();
     }
 
-    void SendMessage(const Message<Id>& msg) {
+    void SendMessage(const Message<T>& msg) {
       asio::post(m_context,
         [this, msg]() {
           bool isWritingNow = !(this->m_send.Empty());
