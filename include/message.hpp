@@ -81,4 +81,10 @@ namespace net {
     return out;
   }
 
+  enum class ServerMessageTypes : std::uint32_t {
+    EstablishConnection,
+    AskUserAddress
+  };
+
+  using ServerMessage = Message<ServerMessageTypes>;
 }
