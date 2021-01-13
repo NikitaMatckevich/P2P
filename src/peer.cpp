@@ -21,17 +21,14 @@ class CustomPeer : public net::Peer<CustomMessageTypes> {
 
   virtual net::Message<CustomMessageTypes> WriteMessage() override final {    
     net::Message<CustomMessageTypes> msg;
-    std::cout << "Please choose the message type\n";
-    std::uint32_t type;
-    std::cin >> type;
-    msg.Header().Id() = CustomMessageTypes{type};
+    msg.Header().Id() = CustomMessageTypes::Say;
     msg << 42;
     return msg;
   }
 };
 
 int main() {
-  std::cout << "Please, enter ypur username:\n";
+  std::cout << "Please, enter your username:\n";
   std::string username;
   std::cin >> username;
   CustomPeer peer(username);

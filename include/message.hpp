@@ -3,6 +3,7 @@
 
 namespace net {
 
+  // handy interface for messages of the network
   template <class T>
   class Connection;
 
@@ -28,6 +29,11 @@ namespace net {
 
     explicit Message(std::shared_ptr<Connection<T>> sender = nullptr)
       : m_sender(std::move(sender)) {}
+
+    void Clear() {
+      m_body.clear();
+      m_header.Size() = 0;
+    }
   
     size_t Size() const noexcept {
       return m_body.size() + sizeof(MessageHeader<T>);
@@ -81,10 +87,4 @@ namespace net {
     return out;
   }
 
-  enum class ServerMessageTypes : std::uint32_t {
-    EstablishConnection,
-    AskUserAddress
-  };
-
-  using ServerMessage = Message<ServerMessageTypes>;
 }

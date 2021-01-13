@@ -2,7 +2,10 @@
 #include <common.hpp>
 
 namespace net {
-  
+
+  // message queues are accessed simultaneously by at least 2 trheads (pushing
+  // thread and pulling thread), so we need to add synchronization primitives
+  // to the ordinary queue object
   template <class T>
   class ThreadSafeQueue {
     std::mutex m_queue_mutex{};

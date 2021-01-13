@@ -27,30 +27,4 @@ namespace net {
     std::cin >> value;
     return value;
   }
-
-  inline std::uint64_t GenRandomKey() {
-    std::random_device rd;
-    std::mt19937_64 mt(rd());
-    std::uint64_t key = mt() ^
-      std::uint64_t(std::chrono::system_clock::now().
-        time_since_epoch().count());
-    return key;
-  }
-
-  inline std::uint64_t Encrypt(std::uint64_t key) {
-    std::uint64_t out = (key & 0xFACEDEADBEEFCAFE) << 5 |
-                        (key & 0xC0DE1DEC0DE1C0DE) >> 3 |
-                        (key ^ 0xF0F0F0F0F0F0F0F0) ;
-    return out ^ (key * key - 12345678);
-  }
-
-  enum class ServerMsgTypes : std::uint32_t {
-    Connect,
-    AskAddress
-  };
-
-  enum class PeerMsgTypes : std::uint32_t {
-    Connect,
-    Say
-  };
 }
